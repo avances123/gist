@@ -46,6 +46,7 @@ module Gist
     @gist_extension = defaults["extension"]
     browse_enabled = defaults["browse"]
     description = nil
+    use_basename = true
 
     opts = OptionParser.new do |opts|
       opts.banner = "Usage: gist [options] [filename or stdin] [filename] ...\n" +
@@ -77,6 +78,10 @@ module Gist
         exit
       end
 
+      opts.on('-b', '--[no-]basename', 'use the basename of the given file (enabled by default)') do |b|
+        use_basename = b
+      end
+
       opts.on('-h', '--help', 'Display this screen') do
         puts opts
         exit
@@ -102,7 +107,7 @@ module Gist
 
           files.push({
             :input     => File.read(file),
-            :filename  => file,
+            :filename  => (use_basename ? File.basename(file) : file),
             :extension => (File.extname(file) if file.include?('.'))
           })
         end
