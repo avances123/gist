@@ -143,7 +143,7 @@ module Gist
     http.ca_file = ca_cert
 
 
-    user, password, gist_oauth_token = auth()
+    user, gist_oauth_token = auth()
     if gist_oauth_token
       req = Net::HTTP::Post.new(url.path + "?access_token=%s" % gist_oauth_token)
     else
@@ -151,10 +151,6 @@ module Gist
     end
 
     req.body = JSON.generate(data(files, private_gist, description))
-
-    if user && password
-      req.basic_auth(user, password)
-    end
 
     response = http.start{|h| h.request(req) }
     case response
@@ -225,23 +221,17 @@ private
   # Returns a basic auth string of the user's GitHub credentials if set.
   # http://github.com/guides/local-github-config
   #
-  # Returns an Array of Strings if auth is found: [user, password]
+  # Returns an Array of Strings if auth is found: [user, gist_oauth_token]
   # Returns nil if no auth is found.
   def auth
     user  = config("github.user")
-    password = config("github.password")
     gist_oauth_token = config("github.gist-oauth-token")
 
-    token = config("github.token")
-    if password.to_s.empty? && !token.to_s.empty? && gist_oauth_token.to_s.empty?
-      abort "Please set GITHUB_PASSWORD or github.password instead of using a token."
+    if gist_oauth_token.to_s.empty?
+      abort "Please set up an oauth token in github.gist-oauth-token."
     end
 
-    if (user.to_s.empty? || password.to_s.empty?) && gist_oauth_token.to_s.empty?
-      nil
-    else
-      [ user, password, gist_oauth_token ]
-    end
+  [ user, gist_oauth_token ]
   end
 
   # Returns default values based on settings in your gitconfig. See
@@ -262,15 +252,10 @@ private
   end
 
   # Reads a config value using:
-  # => Environment: GITHUB_PASSWORD, GITHUB_USER
-  #                 like vim gist plugin
   # => git-config(1)
   #
   # return something useful or nil
   def config(key)
-    env_key = ENV[key.upcase.gsub(/[-.]/, '_')]
-    return env_key if env_key and not env_key.strip.empty?
-
     str_to_bool `git config --global #{key}`.strip
   end
 
