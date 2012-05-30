@@ -43,9 +43,10 @@ module Gist
   def execute(*args)
     private_gist = defaults["private"]
     gist_filename = nil
-    gist_extension = defaults["extension"]
+    @gist_extension = defaults["extension"]
     browse_enabled = defaults["browse"]
     description = nil
+    use_basename = true
 
     opts = OptionParser.new do |opts|
       opts.banner = "Usage: gist [options] [filename or stdin] [filename] ...\n" +
@@ -57,7 +58,7 @@ module Gist
 
       t_desc = 'Set syntax highlighting of the Gist by file extension'
       opts.on('-t', '--type [EXTENSION]', t_desc) do |extension|
-        gist_extension = '.' + extension
+        @gist_extension = '.' + extension
       end
 
       opts.on('-d','--description DESCRIPTION', 'Set description of the new gist') do |d|
@@ -75,6 +76,10 @@ module Gist
       opts.on('-v', '--version', 'Print version') do
         puts Gist::Version
         exit
+      end
+
+      opts.on('-b', '--[no-]basename', 'use the basename of the given file (enabled by default)') do |b|
+        use_basename = b
       end
 
       opts.on('-h', '--help', 'Display this screen') do
@@ -102,7 +107,7 @@ module Gist
 
           files.push({
             :input     => File.read(file),
-            :filename  => file,
+            :filename  => (use_basename ? File.basename(file) : file),
             :extension => (File.extname(file) if file.include?('.'))
           })
         end
@@ -110,7 +115,7 @@ module Gist
       else
         # Read from standard input.
         input = $stdin.read
-        files = [{:input => input, :extension => gist_extension}]
+        files = [{:input => input, :extension => @gist_extension}]
       end
 
       url = write(files, private_gist, description)
@@ -134,16 +139,18 @@ module Gist
     end
 
     http.use_ssl = true
-    http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE
     http.ca_file = ca_cert
 
-    req = Net::HTTP::Post.new(url.path)
-    req.body = JSON.generate(data(files, private_gist, description))
 
-    user, password = auth()
-    if user && password
-      req.basic_auth(user, password)
+    user, gist_oauth_token = auth()
+    if gist_oauth_token
+      req = Net::HTTP::Post.new(url.path + "?access_token=%s" % gist_oauth_token)
+    else
+      req = Net::HTTP::Post.new(url.path)
     end
+
+    req.body = JSON.generate(data(files, private_gist, description))
 
     response = http.start{|h| h.request(req) }
     case response
@@ -200,7 +207,8 @@ private
     file_data = {}
     files.each do |file|
       i = i + 1
-      filename = file[:filename] ? file[:filename] : "gistfile#{i}"
+      filename = "#{filename}#{file[:extension]}" if file[:extension]
+      filename = file[:filename] ? "#{file[:filename]}#{@gist_extension}" : "gist_content#{i}#{@gist_extension}"
       file_data[filename] = {:content => file[:input]}
     end
 
@@ -213,22 +221,17 @@ private
   # Returns a basic auth string of the user's GitHub credentials if set.
   # http://github.com/guides/local-github-config
   #
-  # Returns an Array of Strings if auth is found: [user, password]
+  # Returns an Array of Strings if auth is found: [user, gist_oauth_token]
   # Returns nil if no auth is found.
   def auth
     user  = config("github.user")
-    password = config("github.password")
+    gist_oauth_token = config("github.gist-oauth-token")
 
-    token = config("github.token")
-    if password.to_s.empty? && !token.to_s.empty?
-      abort "Please set GITHUB_PASSWORD or github.password instead of using a token."
+    if gist_oauth_token.to_s.empty?
+      abort "Please set up an oauth token in github.gist-oauth-token."
     end
 
-    if user.to_s.empty? || password.to_s.empty?
-      nil
-    else
-      [ user, password ]
-    end
+  [ user, gist_oauth_token ]
   end
 
   # Returns default values based on settings in your gitconfig. See
@@ -249,15 +252,10 @@ private
   end
 
   # Reads a config value using:
-  # => Environment: GITHUB_PASSWORD, GITHUB_USER
-  #                 like vim gist plugin
   # => git-config(1)
   #
   # return something useful or nil
   def config(key)
-    env_key = ENV[key.upcase.gsub(/\./, '_')]
-    return env_key if env_key and not env_key.strip.empty?
-
     str_to_bool `git config --global #{key}`.strip
   end
 
